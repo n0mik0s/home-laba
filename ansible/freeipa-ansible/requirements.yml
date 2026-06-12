@@ -1,0 +1,6 @@
+---
+collections:
+  - name: freeipa.ansible_freeipa
+    # Check https://galaxy.ansible.com/ui/repo/published/freeipa/ansible_freeipa/
+    # for the latest version before installing.
+    version: ">=1.14.0"

@@ -1,0 +1,34 @@
+---
+# Core identity — matches the freeipa VM's FQDN (terraform: hostname.domain_name)
+# and the Kerberos realm convention (uppercase domain).
+ipaserver_domain: personal.internal
+ipaserver_realm: PERSONAL.INTERNAL
+ipaserver_hostname: freeipa.personal.internal
+
+# --- Integrated DNS ---
+# Every other VM in terraform/laba/config.tfvars has dns = ["192.168.0.10"],
+# i.e. they expect this host to run integrated DNS for personal.internal.
+ipaserver_setup_dns: true
+
+# Forwarders: reuse the freeipa VM's own bootstrap resolvers (cloud-init's
+# dns = ["1.1.1.1", "8.8.8.8"]) as IPA DNS's upstream forwarders.
+ipaserver_forwarders:
+  - 1.1.1.1
+  - 8.8.8.8
+
+# --- Firewalld ---
+# Role default is true; stated explicitly. Terraform's cloud-init already
+# enabled firewalld with an SSH-only "public" zone baseline — this role ADDS
+# FreeIPA's required ports (LDAP/LDAPS, Kerberos, DNS, HTTP/HTTPS, NTP) on top.
+ipaserver_setup_firewalld: true
+
+# --- Hardening ---
+# Don't install the default allow_all HBAC rule — start deny-by-default and
+# add explicit HBAC rules per service/user as other hosts are enrolled later.
+ipaserver_no_hbac_allow: true
+
+# --- Topology ---
+# Standalone server: CA is enabled by role default (required for ACME). No
+# KRA or AD Trust needed.
+ipaserver_setup_kra: false
+ipaserver_setup_adtrust: false

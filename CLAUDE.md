@@ -20,8 +20,10 @@ Terraform project that provisions KVM/QEMU virtual machines on a bare-metal Fedo
 |---|---|
 | Terraform | ≥ 1.9.x (latest stable 1.x; no alpha/beta/RC) |
 | dmacvicar/libvirt provider | `>= 0.9.8` (exact version pinned in `.terraform.lock.hcl`) |
-| Guest OS | Ubuntu 24.04 LTS (Noble Numbat) |
+| Guest OS (default) | Ubuntu 24.04 LTS (Noble Numbat) |
+| Guest OS (freeipa VM) | Fedora Server Cloud Base, latest stable (`os = "fedora"`, see [Per-VM Operating System](#per-vm-operating-system-os)) |
 | libvirt / KVM | Fedora 43 repo packages |
+| FreeIPA | `freeipa.ansible_freeipa` Ansible collection (`>= 1.14.0`) — see [FreeIPA Ansible Project](#freeipa-ansible-project-ansiblefreeipa-ansible) |
 
 Always use the latest **LTS or stable** release. Never use alpha/beta/RC in any environment.
 
@@ -30,25 +32,36 @@ The 0.9.8 provider is a plugin-framework rewrite: resource attributes use object
 ## Directory Structure
 
 ```
-infrastructure/
-└── terraform/
-    ├── laba/                       # "laba" environment — root module
-    │   ├── main.tf                 # Wires all sub-modules together
-    │   ├── provider.tf             # Provider + Terraform version constraints
-    │   ├── variables.tf            # Root input variables
-    │   ├── outputs.tf               # Root outputs (network, pool, VM names/IPs)
-    │   ├── backend.tf              # S3-compatible state backend
-    │   ├── config.tfvars           # Environment variable values (no secrets)
-    │   ├── .terraform.lock.hcl     # Provider lock file — always commit this
-    │   └── cloud-init/
-    │       ├── user-data.yaml.tftpl       # Cloud-init user-data template
-    │       └── network-config.yaml.tftpl  # Cloud-init network config template (v2)
-    └── modules/
-        ├── libvirt_cloudinit_disk/
-        ├── libvirt_domain/
-        ├── libvirt_network/
-        ├── libvirt_pool/
-        └── libvirt_volume/
+terraform/
+├── laba/                       # "laba" environment — root module
+│   ├── main.tf                 # Wires all sub-modules together
+│   ├── provider.tf             # Provider + Terraform version constraints
+│   ├── variables.tf            # Root input variables
+│   ├── outputs.tf               # Root outputs (network, pool, VM names/IPs)
+│   ├── backend.tf              # S3-compatible state backend
+│   ├── config.tfvars           # Environment variable values (no secrets)
+│   ├── .terraform.lock.hcl     # Provider lock file — always commit this
+│   └── cloud-init/
+│       ├── user-data.yaml.tftpl         # Cloud-init user-data template (Ubuntu, os = "ubuntu")
+│       ├── user-data-fedora.yaml.tftpl  # Cloud-init user-data template (Fedora, os = "fedora")
+│       └── network-config.yaml.tftpl    # Cloud-init network config template (v2, shared)
+└── modules/
+    ├── libvirt_cloudinit_disk/
+    ├── libvirt_domain/
+    ├── libvirt_network/
+    ├── libvirt_pool/
+    └── libvirt_volume/
+
+ansible/
+└── freeipa-ansible/            # Standalone FreeIPA server install/config (see "FreeIPA Ansible Project" below)
+    ├── ansible.cfg
+    ├── requirements.yml
+    ├── inventory/hosts.ini
+    ├── group_vars/
+    │   ├── ipaserver.yml
+    │   └── ipaserver/vault.yml.example
+    ├── playbook.yml
+    └── README.md
 ```
 
 Each environment (e.g. `laba`) is its own root module with its own state and backend. New environments are added as sibling directories under `terraform/` (e.g. `terraform/staging/`), reusing the same `modules/`.
@@ -219,6 +232,41 @@ runcmd:
 
 Currently SSH (`tcp dport 22`) is open to any source. Restrict to a management CIDR via a `templatefile()` variable before exposing any VM beyond the trusted LAN.
 
+### 5. Fedora cloud-init differences (`user-data-fedora.yaml.tftpl`)
+
+VMs with `os = "fedora"` (currently only `freeipa`) use a separate user-data template, `cloud-init/user-data-fedora.yaml.tftpl`, instead of `user-data.yaml.tftpl`. Differences from the Ubuntu template:
+
+- **Admin user group**: `groups: [wheel]` (Fedora's sudo group), not `[sudo]`.
+- **Packages**: `qemu-guest-agent`, `rng-tools`, `curl`, `ca-certificates`, `git`, and conditionally `lvm2` — same set as Ubuntu minus `nftables` (Fedora uses firewalld instead).
+- **Firewall**: `firewalld` (Fedora's default), not raw `nftables`. `runcmd` enables firewalld, sets the default zone to `public`, and opens only `ssh`. This baseline is intentionally minimal — `ansible-freeipa`'s `ipaserver` role (with `ipaserver_setup_firewalld: true`, the role default) ADDS FreeIPA's required ports (LDAP/LDAPS, Kerberos, DNS, HTTP/HTTPS, NTP) on top of this baseline during the Ansible run (see [FreeIPA Ansible Project](#freeipa-ansible-project-ansiblefreeipa-ansible)). Verify the active zone with `firewall-cmd --get-active-zones` if firewalld behavior seems unexpected — some Fedora Cloud variants default to a `FedoraServer` zone rather than `public`.
+- **SELinux**: left at its Fedora-default `Enforcing` mode — not disabled. ansible-freeipa's `ipaserver` role manages the SELinux contexts/booleans FreeIPA needs.
+- **`/etc/hosts` / FQDN resolution**: `manage_etc_hosts: false` (cloud-init's default `/etc/hosts` management writes a `127.0.1.1 <fqdn>` entry, which breaks `ipa-server-install`'s requirement that the FQDN resolve to the VM's real static IP). Instead, `write_files` renders a complete static `/etc/hosts` with `${ip_address_no_cidr} <fqdn> <hostname>` (the IP, stripped of its `/<cidr>` suffix via `split("/", each.value.ip_address)[0]` in `main.tf`).
+- **Data disk LVM provisioning** (`pvcreate`/`vgcreate`/`lvcreate`/`mkfs`/fstab/mount `runcmd` block): identical to the Ubuntu template, copied verbatim — these are distro-agnostic LVM2/util-linux commands.
+- `network-config.yaml.tftpl` is **shared, unchanged** — see [Per-VM Operating System (`os`)](#per-vm-operating-system-os) below.
+
+## Per-VM Operating System (`os`)
+
+Each entry in `var.vms` (`terraform/laba/config.tfvars`) has an `os` field:
+
+```hcl
+vms = {
+  "freeipa" = {
+    # ...
+    os = "fedora"   # default is "ubuntu" if omitted
+  }
+}
+```
+
+- `os = optional(string, "ubuntu")`, validated to be one of `"ubuntu"` or `"fedora"`.
+- `os = "ubuntu"` (default): the per-VM overlay's `base_volume_path` points at `module.libvirt_volume_base` (Ubuntu 24.04 Noble, `source_url` hardcoded to the evergreen `cloud-images.ubuntu.com/noble/current/` URL), and cloud-init renders `cloud-init/user-data.yaml.tftpl` (netplan/nftables/`sudo` group).
+- `os = "fedora"`: the overlay's `base_volume_path` points at `module.libvirt_volume_base_fedora` (Fedora Cloud Base, `source_url` = `var.fedora_cloud_image_url`), and cloud-init renders `cloud-init/user-data-fedora.yaml.tftpl` (NetworkManager/firewalld/SELinux/`wheel` group — see above).
+- `network-config.yaml.tftpl` (cloud-init v2 network-config schema) is **shared/reused unchanged** for both OSes — the schema is renderer-agnostic across netplan (Ubuntu) and NetworkManager/sysconfig (Fedora).
+- Currently only the `freeipa` VM uses `os = "fedora"` (required because ansible-freeipa's `ipaserver` role does not support Ubuntu).
+
+### `fedora_cloud_image_url`
+
+Set in `config.tfvars`. Unlike Ubuntu's evergreen `noble/current/` URL, Fedora has no equivalent "always current stable" path — `fedora_cloud_image_url` must be a versioned URL to a specific Fedora release's "Generic" Cloud Base x86_64 qcow2 image. **Before every `terraform apply` that (re)creates the Fedora base volume**, check https://fedoraproject.org/cloud/download for the current stable (non-Beta, non-Rawhide) release and update this URL if a newer release has superseded it. Never point this at a Beta or Rawhide build (violates the "latest LTS/stable only" rule above).
+
 ## Cloud-Init Template Rendering
 
 Use the `templatefile()` built-in function. **Do not use** the deprecated `data "template_file"` data source.
@@ -341,6 +389,23 @@ vms = {
   - cloud-init's `mounts` module isn't used for data disks (it runs *before* `runcmd`, so the LV wouldn't exist yet) — the `/etc/fstab` entry and mount are done manually in `runcmd`.
 - This whole `runcmd` block (and the `lvm2` package) is omitted entirely when a VM has no `data_disks`.
 
+## FreeIPA Ansible Project (`ansible/freeipa-ansible/`)
+
+A separate Ansible project (not invoked by Terraform) configures the `freeipa` VM (provisioned by `terraform/laba/` with `os = "fedora"`, static IP `192.168.0.10`, FQDN `freeipa.personal.internal`) as a **standalone FreeIPA server**: LDAP directory, Kerberos KDC (`PERSONAL.INTERNAL` realm), integrated DNS (serving `personal.internal`, which all other `laba` VMs already point their `dns` at), CA, and ACME (enabled post-install via `ipa-acme-manage enable`).
+
+Uses the upstream [`freeipa.ansible_freeipa`](https://github.com/freeipa/ansible-freeipa) collection's `ipaserver` role — chosen specifically because this role does not support Ubuntu (only `ipaclient` does), which is why the `freeipa` VM runs Fedora (`os = "fedora"`) while every other VM in this repo runs Ubuntu.
+
+### Relationship to `terraform apply`
+
+These are **two independent steps, run in sequence, not coupled**:
+
+1. `terraform apply` (from `terraform/laba/`) provisions the `freeipa` VM: Fedora OS, static networking, firewalld baseline (SSH-only), SSH access as `ops`.
+2. `ansible-playbook -i inventory/hosts.ini playbook.yml --ask-vault-pass` (from `ansible/freeipa-ansible/`) installs and configures FreeIPA on top of the already-running VM.
+
+Re-running step 2 (e.g. after a FreeIPA config change) does NOT require re-running step 1, and vice versa — `terraform apply` for other VMs/changes does not affect or require re-running the Ansible playbook.
+
+See `ansible/freeipa-ansible/README.md` for full setup (vault secrets, collection install, host-key verification) and post-install verification steps.
+
 ## Security Rules
 
 1. **No secrets in code.** Passwords, SSH keys, and tokens go in environment variables or `TF_VAR_*` — never in `.tf`, `.yaml`, or `.tfvars` files.
@@ -355,8 +420,7 @@ vms = {
 
 ## Known Issues — Fix Before Production
 
-- [ ] No `.gitignore` exists yet under `infrastructure/` — add one excluding `.terraform/` and any local `terraform.tfstate*`, while keeping `.terraform.lock.hcl` and `config.tfvars` tracked.
-- [ ] `modules/libvirt_volume/main.tf`: Ubuntu Noble image URL has no checksum (`source_hash` / similar) — add SHA256 verification of the downloaded base image.
+- [ ] `modules/libvirt_volume/main.tf`: neither the Ubuntu Noble image URL nor `fedora_cloud_image_url` have a checksum (`source_hash`/similar) — add SHA256 verification of downloaded base images.
 - [ ] nftables `tcp dport 22 accept` is open to any source — restrict to a management CIDR via a templatefile variable.
 - [ ] Only the `laba` environment exists — `staging`/`prod` root modules (with their own `backend.tf` state key) are not yet created.
 
@@ -373,7 +437,7 @@ These must exist on the Fedora Server before `terraform apply`:
 ## Common Commands
 
 ```bash
-# All commands run from infrastructure/terraform/laba/
+# All commands run from terraform/laba/
 
 # First-time init (or after provider changes) — requires S3 backend credentials
 AWS_ACCESS_KEY_ID=<key> AWS_SECRET_ACCESS_KEY=<secret> terraform init

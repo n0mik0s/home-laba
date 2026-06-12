@@ -1,0 +1,72 @@
+#cloud-config
+hostname: ${hostname}
+fqdn: ${hostname}.${domain_name}
+
+# cloud-init's default manage_etc_hosts writes a 127.0.1.1 entry for the FQDN,
+# which breaks ipa-server-install (the FQDN must resolve to the host's real
+# static IP, not loopback). Disable cloud-init's /etc/hosts management and
+# write it explicitly below.
+manage_etc_hosts: false
+
+# SELinux remains in its default Enforcing mode (Fedora Cloud default).
+# ansible-freeipa's ipaserver role manages the SELinux contexts/booleans
+# FreeIPA needs.
+
+ssh_pwauth: false
+disable_root: true
+
+users:
+  - name: ${admin_user}
+    groups: [wheel]
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: true
+    ssh_authorized_keys:
+      - ${ssh_public_key}
+
+packages:
+  - qemu-guest-agent
+  - rng-tools
+  - firewalld
+  - curl
+  - ca-certificates
+  - git
+%{ if anytrue([for disk in data_disks : disk.format]) ~}
+  - lvm2
+%{ endif ~}
+
+package_update: true
+package_upgrade: false
+
+write_files:
+  - path: /etc/hosts
+    permissions: '0644'
+    owner: root:root
+    content: |
+      127.0.0.1   localhost localhost.localdomain localhost4 localhost4.localdomain4
+      ::1         localhost localhost.localdomain localhost6 localhost6.localdomain6
+      ${ip_address_no_cidr} ${hostname}.${domain_name} ${hostname}
+
+runcmd:
+  - systemctl enable --now qemu-guest-agent
+  - systemctl enable --now rngd
+%{ for disk in data_disks ~}
+%{ if disk.format ~}
+  - |
+    if ! pvs ${disk.device} >/dev/null 2>&1; then
+      pvcreate ${disk.device}
+      vgcreate vg_${disk.label} ${disk.device}
+      lvcreate -l 100%FREE -n lv_${disk.label} vg_${disk.label}
+      mkfs.${disk.fs_type} /dev/vg_${disk.label}/lv_${disk.label}
+    fi
+    mkdir -p ${disk.mount_point}
+    if ! grep -q "/dev/vg_${disk.label}/lv_${disk.label}" /etc/fstab; then
+      echo "/dev/vg_${disk.label}/lv_${disk.label}  ${disk.mount_point}  ${disk.fs_type}  defaults,nofail  0  2" >> /etc/fstab
+    fi
+    mount ${disk.mount_point}
+%{ endif ~}
+%{ endfor ~}
+  - systemctl enable --now firewalld
+  - firewall-cmd --set-default-zone=public
+  - firewall-cmd --permanent --zone=public --add-service=ssh
+  - firewall-cmd --reload

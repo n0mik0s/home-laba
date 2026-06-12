@@ -1,0 +1,10 @@
+---
+# Copy to group_vars/ipaserver/vault.yml and encrypt:
+#   ansible-vault encrypt group_vars/ipaserver/vault.yml
+# The encrypted file is gitignored — never commit real passwords.
+
+# Directory Manager (LDAP root DN) password — also needed for DR.
+ipadm_password: "CHANGE_ME_use_a_long_random_passphrase"
+
+# IPA 'admin' Kerberos principal password.
+ipaadmin_password: "CHANGE_ME_use_a_different_long_random_passphrase"

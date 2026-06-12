@@ -1,0 +1,20 @@
+---
+- name: Install and configure standalone FreeIPA server
+  hosts: ipaserver
+  become: true
+
+  roles:
+    - role: freeipa.ansible_freeipa.ipaserver
+      state: present
+
+  post_tasks:
+    - name: Check current ACME status
+      ansible.builtin.command: ipa-acme-manage status
+      register: acme_status
+      changed_when: false
+
+    - name: Enable ACME service
+      ansible.builtin.command: ipa-acme-manage enable
+      register: acme_enable
+      changed_when: "'already enabled' not in acme_enable.stdout"
+      when: "'ACME is enabled' not in acme_status.stdout"

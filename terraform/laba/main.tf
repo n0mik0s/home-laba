@@ -18,14 +18,26 @@ module "libvirt_volume_base" {
   source_url   = "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
 }
 
+module "libvirt_volume_base_fedora" {
+  source       = "../modules/libvirt_volume"
+  project_name = var.project_name
+  vm_name      = "fedora-base"
+  pool         = module.libvirt_pool.name
+  source_url   = var.fedora_cloud_image_url
+}
+
 module "libvirt_volume" {
-  for_each         = var.vms
-  source           = "../modules/libvirt_volume"
-  project_name     = var.project_name
-  vm_name          = each.key
-  pool             = module.libvirt_pool.name
-  base_volume_path = module.libvirt_volume_base.path
-  capacity         = each.value.disk_size_gb
+  for_each     = var.vms
+  source       = "../modules/libvirt_volume"
+  project_name = var.project_name
+  vm_name      = each.key
+  pool         = module.libvirt_pool.name
+  base_volume_path = (
+    each.value.os == "fedora"
+    ? module.libvirt_volume_base_fedora.path
+    : module.libvirt_volume_base.path
+  )
+  capacity = each.value.disk_size_gb
 }
 
 locals {
@@ -54,13 +66,19 @@ module "libvirt_cloudinit_disk" {
   project_name = var.project_name
   vm_name      = each.key
 
-  user_data = templatefile("${path.module}/cloud-init/user-data.yaml.tftpl", {
-    hostname       = each.key
-    domain_name    = var.domain_name
-    admin_user     = var.admin_user
-    ssh_public_key = var.ssh_public_key
-    data_disks     = local.vm_data_disk_mounts[each.key]
-  })
+  user_data = templatefile(
+    each.value.os == "fedora"
+    ? "${path.module}/cloud-init/user-data-fedora.yaml.tftpl"
+    : "${path.module}/cloud-init/user-data.yaml.tftpl",
+    {
+      hostname           = each.key
+      domain_name        = var.domain_name
+      admin_user         = var.admin_user
+      ssh_public_key     = var.ssh_public_key
+      data_disks         = local.vm_data_disk_mounts[each.key]
+      ip_address_no_cidr = split("/", each.value.ip_address)[0]
+    }
+  )
 
   network_config = templatefile("${path.module}/cloud-init/network-config.yaml.tftpl", {
     network_interface = each.value.network_interface

@@ -23,6 +23,7 @@ bin/
 # === Ansible ===
 *.retry
 .vault_pass*
+ansible/freeipa-ansible/group_vars/ipaserver/vault.yml
 
 # === Secrets / credentials (defense in depth) ===
 *.pem
@@ -33,7 +34,7 @@ id_ed25519*
 .env.*
 
 # === Confidential data (recursive) ===
-infrastructure/confidential/
+confidential/
 
 # === Claude Code settings (recursive) ===
 .claude/
