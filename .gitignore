@@ -1,0 +1,44 @@
+# === Terraform ===
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+.terraform.tfstate.lock.info
+crash.log
+crash.*.log
+*.tfplan
+*.tfplan.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+# NOTE: .terraform.lock.hcl and config.tfvars are committed intentionally (no secrets)
+
+# === Local terraform binary ===
+bin/
+
+# === Ansible ===
+*.retry
+.vault_pass*
+
+# === Secrets / credentials (defense in depth) ===
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+.env
+.env.*
+
+# === Confidential data (recursive) ===
+infrastructure/confidential/
+
+# === Claude Code settings (recursive) ===
+.claude/
+
+# === Editor / OS cruft ===
+.DS_Store
+*.swp
+*.swo
+*~

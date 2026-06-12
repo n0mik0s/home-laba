@@ -1,0 +1,68 @@
+#cloud-config
+hostname: ${hostname}
+fqdn: ${hostname}.${domain_name}
+manage_etc_hosts: true
+
+ssh_pwauth: false
+disable_root: true
+
+users:
+  - name: ${admin_user}
+    groups: [sudo]
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: true
+    ssh_authorized_keys:
+      - ${ssh_public_key}
+
+packages:
+  - qemu-guest-agent
+  - rng-tools
+  - nftables
+  - curl
+  - ca-certificates
+  - git
+%{ if anytrue([for disk in data_disks : disk.format]) ~}
+  - lvm2
+%{ endif ~}
+
+package_update: true
+package_upgrade: false
+
+runcmd:
+  - systemctl enable --now qemu-guest-agent
+  - systemctl enable --now rngd
+%{ for disk in data_disks ~}
+%{ if disk.format ~}
+  - |
+    if ! pvs ${disk.device} >/dev/null 2>&1; then
+      pvcreate ${disk.device}
+      vgcreate vg_${disk.label} ${disk.device}
+      lvcreate -l 100%FREE -n lv_${disk.label} vg_${disk.label}
+      mkfs.${disk.fs_type} /dev/vg_${disk.label}/lv_${disk.label}
+    fi
+    mkdir -p ${disk.mount_point}
+    if ! grep -q "/dev/vg_${disk.label}/lv_${disk.label}" /etc/fstab; then
+      echo "/dev/vg_${disk.label}/lv_${disk.label}  ${disk.mount_point}  ${disk.fs_type}  defaults,nofail  0  2" >> /etc/fstab
+    fi
+    mount ${disk.mount_point}
+%{ endif ~}
+%{ endfor ~}
+  - |
+    nft -f - <<'NFTEOF'
+    table inet filter {
+      chain input {
+        type filter hook input priority 0; policy drop;
+        iif "lo" accept
+        ct state established,related accept
+        ip protocol icmp accept
+        ip6 nexthdr icmpv6 accept
+        tcp dport 22 accept
+        log prefix "nft-drop: " drop
+      }
+      chain forward { type filter hook forward priority 0; policy drop; }
+      chain output  { type filter hook output  priority 0; policy accept; }
+    }
+    NFTEOF
+  - nft list ruleset > /etc/nftables.conf
+  - systemctl enable --now nftables
