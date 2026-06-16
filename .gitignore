@@ -38,6 +38,7 @@ confidential/
 
 # === Claude Code settings (recursive) ===
 .claude/
+CLAUDE.md
 
 # === Editor / OS cruft ===
 .DS_Store
