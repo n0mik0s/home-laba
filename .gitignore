@@ -17,13 +17,17 @@ override.tf.json
 terraform.rc
 # NOTE: .terraform.lock.hcl and config.tfvars are committed intentionally (no secrets)
 
-# === Local terraform binary ===
+# === Local pinned CLI binaries (see scripts/bootstrap-bin.sh) ===
 bin/
+
+# === Python / uv ===
+.venv/
 
 # === Ansible ===
 *.retry
-.vault_pass*
-ansible/freeipa-ansible/group_vars/ipaserver/vault.yml
+# NOTE: *.sops.yaml files ARE committed intentionally — they are age-encrypted
+# at rest, that's the point of sops. Only the age private key (kept under
+# confidential/, see below) and any plaintext scratch files must stay local.
 
 # === Secrets / credentials (defense in depth) ===
 *.pem

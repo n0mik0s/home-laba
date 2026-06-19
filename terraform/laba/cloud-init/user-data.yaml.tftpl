@@ -40,6 +40,18 @@ runcmd:
       vgcreate vg_${disk.label} ${disk.device}
       lvcreate -l 100%FREE -n lv_${disk.label} vg_${disk.label}
       mkfs.${disk.fs_type} /dev/vg_${disk.label}/lv_${disk.label}
+      # Seed the new filesystem with whatever already lives at the mount
+      # point (e.g. /var ships with dpkg/apt/log state from the base image)
+      # before it gets covered up below — otherwise that content becomes
+      # inaccessible the moment the new disk is mounted over it.
+      mkdir -p ${disk.mount_point}
+      mkdir -p /mnt/seed_${disk.label}
+      mount /dev/vg_${disk.label}/lv_${disk.label} /mnt/seed_${disk.label}
+      if [ -n "$(ls -A ${disk.mount_point} 2>/dev/null)" ]; then
+        cp -a ${disk.mount_point}/. /mnt/seed_${disk.label}/
+      fi
+      umount /mnt/seed_${disk.label}
+      rmdir /mnt/seed_${disk.label}
     fi
     mkdir -p ${disk.mount_point}
     if ! grep -q "/dev/vg_${disk.label}/lv_${disk.label}" /etc/fstab; then
