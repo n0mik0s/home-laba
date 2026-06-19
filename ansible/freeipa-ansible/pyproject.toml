@@ -1,0 +1,23 @@
+[project]
+name = "freeipa-ansible"
+version = "0.1.0"
+description = "Control-node toolchain for the standalone FreeIPA Ansible project"
+requires-python = ">=3.12"
+dependencies = [
+  "ansible-core>=2.20",
+  "PyYAML>=6.0",
+  # amazon.aws.s3_object / s3_object_info (used by playbooks/backup.yml and
+  # restore.yml) talk to the S3-compatible backend via boto3/botocore.
+  "boto3>=1.34",
+  "botocore>=1.34",
+  # Available for custom IPA automation beyond what ansible-freeipa's
+  # roles/modules cover (e.g. bulk queries, reporting). Not yet used by
+  # any playbook in this repo — add scripts under scripts/ as needs arise.
+  "python-freeipa>=1.0.10",
+]
+
+[dependency-groups]
+dev = [
+  "ansible-lint>=24.0",
+  "yamllint>=1.35",
+]

@@ -1,0 +1,20 @@
+---
+# sops creation rules. path_regex is matched relative to this file's
+# directory (ansible/freeipa-ansible/), not the repo root.
+#
+# Only the public key lives here — safe to commit. The matching private key
+# lives at confidential/sops/age-keys.txt (gitignored, never committed) and
+# is loaded via SOPS_AGE_KEY_FILE (see confidential/.env / README.md).
+creation_rules:
+  - path_regex: group_vars/ipaserver/secrets\.sops\.yaml$
+    key_groups:
+      - age:
+          - age1ne5qwpqntg3m60qugynrqrjufxdajkxqt368rln4kdat6k5mz5mq9xnfzw
+  - path_regex: group_vars/all/secrets\.sops\.yaml$
+    key_groups:
+      - age:
+          - age1ne5qwpqntg3m60qugynrqrjufxdajkxqt368rln4kdat6k5mz5mq9xnfzw
+  - path_regex: group_vars/all/identity\.sops\.yaml$
+    key_groups:
+      - age:
+          - age1ne5qwpqntg3m60qugynrqrjufxdajkxqt368rln4kdat6k5mz5mq9xnfzw

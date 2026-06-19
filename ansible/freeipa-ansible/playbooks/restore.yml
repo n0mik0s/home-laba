@@ -1,0 +1,77 @@
+---
+# Disaster recovery: pulls a backup tarball from S3 and runs ipa-restore,
+# OVERWRITING the live server's data. Requires explicit confirmation.
+#
+# Usage:
+#   ansible-playbook playbooks/restore.yml -e confirm_restore=true
+#   ansible-playbook playbooks/restore.yml -e confirm_restore=true -e backup_name=ipa-full-2026-06-01-00-00-00
+#
+# Omit backup_name to restore the most recent backup found in the bucket.
+- name: Restore FreeIPA from an S3 backup
+  hosts: ipaserver
+  become: true
+
+  vars:
+    s3_bucket: laba
+    s3_region: main
+    s3_endpoint_url: https://s3-api.personal.org.ua
+    s3_key_prefix: laba/backups/freeipa
+    local_backup_dir: "{{ playbook_dir }}/../../../confidential/backups/freeipa"
+
+  tasks:
+    - name: Require explicit confirmation before a destructive restore
+      ansible.builtin.assert:
+        that: confirm_restore | default(false) | bool
+        fail_msg: >-
+          This will overwrite the live FreeIPA server's data. Re-run with
+          -e confirm_restore=true to proceed (optionally -e backup_name=...).
+
+    - name: List backups in S3
+      delegate_to: localhost
+      become: false
+      amazon.aws.s3_object_info:
+        bucket_name: "{{ s3_bucket }}"
+        region: "{{ s3_region }}"
+        endpoint_url: "{{ s3_endpoint_url }}"
+        prefix: "{{ s3_key_prefix }}/"
+      register: s3_backups
+      when: backup_name is not defined
+
+    - name: Resolve which backup to restore
+      ansible.builtin.set_fact:
+        backup_key: >-
+          {{ (s3_backups.s3_keys | sort | last) if backup_name is not defined
+             else s3_key_prefix + '/' + backup_name + '.tar.gz' }}
+
+    - name: Download the backup tarball from S3
+      delegate_to: localhost
+      become: false
+      amazon.aws.s3_object:
+        mode: get
+        bucket: "{{ s3_bucket }}"
+        region: "{{ s3_region }}"
+        endpoint_url: "{{ s3_endpoint_url }}"
+        object: "{{ backup_key }}"
+        dest: "{{ local_backup_dir }}/{{ backup_key | basename }}"
+
+    - name: Copy the tarball to the IPA server
+      ansible.builtin.copy:
+        src: "{{ local_backup_dir }}/{{ backup_key | basename }}"
+        dest: "/var/lib/ipa/backup/{{ backup_key | basename }}"
+        mode: "0600"
+
+    - name: Extract the tarball on the server
+      ansible.builtin.unarchive:
+        src: "/var/lib/ipa/backup/{{ backup_key | basename }}"
+        dest: /var/lib/ipa/backup/
+        remote_src: true
+        creates: "/var/lib/ipa/backup/{{ backup_key | basename | regex_replace('\\.tar\\.gz$', '') }}"
+
+    - name: Run ipa-restore
+      ansible.builtin.command:
+        cmd: >-
+          ipa-restore --unattended -p {{ ipadm_password }}
+          /var/lib/ipa/backup/{{ backup_key | basename | regex_replace('\.tar\.gz$', '') }}
+      register: ipa_restore_result
+      changed_when: true
+      no_log: true

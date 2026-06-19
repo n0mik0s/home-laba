@@ -1,0 +1,88 @@
+---
+# Copy to group_vars/all/identity.sops.yaml and encrypt in place:
+#   cp group_vars/all/identity.sops.yaml.example group_vars/all/identity.sops.yaml
+#   # edit the example users/groups/HBAC rules below to match reality, then:
+#   sops -e -i group_vars/all/identity.sops.yaml
+#
+# Source of truth for IPA users/groups/HBAC, applied idempotently by
+# playbooks/manage-identity.yml via the freeipa.ansible_freeipa collection's
+# ipauser/ipagroup/ipahbacrule modules. Contains personal data (names) and
+# optionally initial passwords — hence sops-encrypted like secrets.sops.yaml.
+#
+# This is example content only — replace it with your real users/groups/
+# HBAC rules before running manage-identity.yml.
+
+ipa_groups:
+  - name: ops
+    description: Operators with SSH access to enrolled hosts
+
+ipa_users:
+  - uid: jdoe
+    first: Jane
+    last: Doe
+    groups:
+      - ops
+    # Optional one-time password set on creation; the user is forced to
+    # change it on first kinit. Omit this key entirely for users created
+    # some other way (e.g. self-registration) who shouldn't get one.
+    initial_password: "CHANGE_ME_use_a_long_random_passphrase"
+    # Optional per-user login shell override. Omit to inherit the
+    # server-wide ipa_default_shell (group_vars/ipaserver/config.yml) —
+    # but note that only applies to *new* users; changing ipa_default_shell
+    # does not retroactively change existing users, so an already-created
+    # user needs this set explicitly to actually change their shell.
+    shell: /bin/bash
+
+# FreeIPA hostgroups are separate entities from this project's Ansible
+# inventory groups (inventory/terraform.py's `ipaclients` group) — sharing
+# a name is a convention, not automatic. manage-identity.yml creates these
+# as empty containers; playbooks/enroll-client.yml adds each enrolled host
+# as a member (see group_vars/ipaclients.yml's ipa_client_hostgroups).
+ipa_hostgroups:
+  - name: ipaclients
+    description: Hosts enrolled as IPA clients
+
+# ipaserver_no_hbac_allow: true (group_vars/ipaserver/config.yml) means
+# nothing authenticates anywhere by default — every allowed (group,
+# hostgroup, service) combination must be listed explicitly here. Every
+# hostgroup referenced here must also appear in ipa_hostgroups above, or
+# the HBAC rule will fail with "hostgroup ...: no such entry".
+ipa_hbac_rules:
+  - name: allow-ops-ssh
+    description: Operators may SSH and sudo on any enrolled client
+    user_groups:
+      - ops
+    host_groups:
+      - ipaclients
+    # "sudo"/"sudo-i" are PAM *service* names, not commands — this is what
+    # gates whether `sudo`/`sudo -i` is allowed to run at all on this host.
+    # It's entirely independent of ipa_sudo_rules below, which gates *which
+    # commands* sudo then permits. Without both, you get "sudo: PAM account
+    # management error: Permission denied" even with a matching sudo rule.
+    services:
+      - sshd
+      - sudo
+      - sudo-i
+
+# Separate from HBAC — HBAC controls who can log in, sudo rules control who
+# can become root once logged in. Same hostgroup-must-already-exist
+# constraint as HBAC applies here too.
+ipa_sudo_rules:
+  - name: allow-ops-sudo
+    description: Operators get full passwordless sudo on enrolled clients
+    user_groups:
+      - ops
+    host_groups:
+      - ipaclients
+    command_category: all
+    # Without this, the rule has no RunAs target at all and grants nothing
+    # usable — `sudo <cmd>` runs as root, so the rule must explicitly say
+    # "any user" is a valid RunAs target. Easy to miss: ipasudorule creates
+    # successfully either way, with no warning that it's a no-op without this.
+    run_as_user_category: all
+    # "!authenticate" is IPA's sudoOption for NOPASSWD — matches the
+    # NOPASSWD:ALL already granted to cloud-init's admin user (see
+    # terraform/laba/cloud-init/user-data.yaml.tftpl). Remove this option
+    # (and the rule still grants full sudo) if you want a password prompt.
+    options:
+      - "!authenticate"

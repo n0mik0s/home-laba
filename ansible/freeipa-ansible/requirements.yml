@@ -3,4 +3,21 @@ collections:
   - name: freeipa.ansible_freeipa
     # Check https://galaxy.ansible.com/ui/repo/published/freeipa/ansible_freeipa/
     # for the latest version before installing.
-    version: ">=1.14.0"
+    version: ">=1.16.0"
+
+  # s3_object / s3_object_info, used by playbooks/backup.yml and
+  # playbooks/restore.yml to push/pull ipa-backup archives to/from the same
+  # S3-compatible bucket Terraform uses for state (different key prefix,
+  # see README.md).
+  - name: amazon.aws
+    version: ">=11.3.0"
+
+  # community.general.archive (ansible.builtin has unarchive but no
+  # create-archive module) — used by playbooks/backup.yml.
+  - name: community.general
+    version: ">=13.1.0"
+
+  # Transparent decryption of *.sops.yaml group_vars/host_vars at load time
+  # (vars plugin) — see ansible.cfg's vars_plugins_enabled.
+  - name: community.sops
+    version: ">=2.4.0"

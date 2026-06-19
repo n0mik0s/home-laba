@@ -1,0 +1,18 @@
+---
+# Vars for hosts in the `ipaclients` inventory group (see
+# inventory/ipaclients_allowlist.json for which Terraform VMs are actually
+# members — empty/none by default).
+#
+# Domain/realm/server are intentionally NOT set here: integrated DNS
+# (ipaserver_setup_dns: true, group_vars/ipaserver/config.yml) means every laba VM
+# already resolves and discovers the realm via DNS SRV records, and
+# ipaclient's default ipaclient_no_dns_lookup: no relies on exactly that.
+# ipaadmin_principal / ipaadmin_password come from group_vars/all/secrets.sops.yaml.
+
+ipaclient_mkhomedir: true
+
+# FreeIPA hostgroup(s) (created by playbooks/manage-identity.yml's
+# ipa_hostgroups, see group_vars/all/identity.sops.yaml) that
+# playbooks/enroll-client.yml adds each enrolled host to as a member.
+ipa_client_hostgroups:
+  - ipaclients

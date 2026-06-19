@@ -1,0 +1,40 @@
+---
+# Enrolls hosts in the `ipaclients` inventory group as IPA clients.
+#
+# The group is empty by default — see inventory/ipaclients_allowlist.json.
+# Add a Terraform vm_ips key there only when you're ready to actually
+# enroll that host; this playbook will otherwise simply have nothing to do
+# (`ansible-playbook` against an empty group is a no-op, not an error).
+- name: Enroll hosts as IPA clients
+  hosts: ipaclients
+  become: true
+
+  roles:
+    - role: freeipa.ansible_freeipa.ipaclient
+      state: present
+
+  tasks:
+    # Joining the realm (above) does not add the host to any FreeIPA
+    # hostgroup — that's a separate entity from this group, so HBAC rules
+    # referencing a hostgroup (manage-identity.yml's ipa_hostgroups) need
+    # this host added explicitly. The "ensure exists" step is idempotent
+    # and only here as a safety net if this runs before manage-identity.yml.
+    - name: Ensure this client's IPA hostgroups exist
+      freeipa.ansible_freeipa.ipahostgroup:
+        ipaadmin_principal: "{{ ipaadmin_principal }}"
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        name: "{{ item }}"
+      loop: "{{ ipa_client_hostgroups }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Add this client to its IPA hostgroups
+      freeipa.ansible_freeipa.ipahostgroup:
+        ipaadmin_principal: "{{ ipaadmin_principal }}"
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        name: "{{ item }}"
+        action: member
+        host: "{{ inventory_hostname }}"
+      loop: "{{ ipa_client_hostgroups }}"
+      loop_control:
+        label: "{{ item }}"

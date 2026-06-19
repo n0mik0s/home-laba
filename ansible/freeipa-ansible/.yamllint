@@ -1,0 +1,26 @@
+---
+extends: default
+
+ignore: |
+  .venv/
+  # Encrypted ciphertext (ENC[...] comments, long blob lines) — not
+  # meaningful to style-check. *.sops.yaml.example templates are still
+  # linted normally.
+  group_vars/**/*.sops.yaml
+
+rules:
+  # Aligned with ansible-lint's bundled yamllint config so both tools agree.
+  comments:
+    min-spaces-from-content: 1
+  comments-indentation: false
+  document-start: disable
+  line-length:
+    max: 160
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: true
+  truthy:
+    allowed-values: ["true", "false"]

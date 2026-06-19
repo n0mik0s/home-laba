@@ -1,0 +1,63 @@
+---
+# Runs ipa-backup on the server, then archives the result to the same
+# S3-compatible bucket Terraform uses for state (different key prefix —
+# see terraform/laba/backend.tf's bucket="laba" vs s3_key_prefix below).
+# Reuses the same AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY already exported
+# for Terraform (confidential/.env) — no separate backup credentials.
+#
+# A local copy also lands under confidential/backups/freeipa/ (gitignored)
+# as a second copy independent of S3 availability.
+- name: Back up FreeIPA to S3
+  hosts: ipaserver
+  become: true
+
+  vars:
+    s3_bucket: laba
+    s3_region: main
+    s3_endpoint_url: https://s3-api.personal.org.ua
+    s3_key_prefix: laba/backups/freeipa
+    local_backup_dir: "{{ playbook_dir }}/../../../confidential/backups/freeipa"
+
+  tasks:
+    - name: Run ipa-backup
+      ansible.builtin.command: ipa-backup
+      register: ipa_backup_result
+      changed_when: true
+
+    - name: Determine backup path from ipa-backup output
+      ansible.builtin.set_fact:
+        backup_path: >-
+          {{ (ipa_backup_result.stdout_lines + ipa_backup_result.stderr_lines)
+             | select('search', 'Backed up to ')
+             | first
+             | regex_replace('^.*Backed up to ', '') }}
+
+    - name: Archive the backup into a single tarball, removing the raw copy
+      community.general.archive:
+        path: "{{ backup_path }}"
+        dest: "{{ backup_path }}.tar.gz"
+        format: gz
+        remove: true
+        mode: "0600"
+
+    - name: Fetch the tarball to the control node
+      ansible.builtin.fetch:
+        src: "{{ backup_path }}.tar.gz"
+        dest: "{{ local_backup_dir }}/"
+        flat: true
+
+    - name: Remove the tarball from the server (copy now lives in S3 + locally)
+      ansible.builtin.file:
+        path: "{{ backup_path }}.tar.gz"
+        state: absent
+
+    - name: Upload the tarball to S3
+      delegate_to: localhost
+      become: false
+      amazon.aws.s3_object:
+        mode: put
+        bucket: "{{ s3_bucket }}"
+        region: "{{ s3_region }}"
+        endpoint_url: "{{ s3_endpoint_url }}"
+        src: "{{ local_backup_dir }}/{{ backup_path | basename }}.tar.gz"
+        object: "{{ s3_key_prefix }}/{{ backup_path | basename }}.tar.gz"

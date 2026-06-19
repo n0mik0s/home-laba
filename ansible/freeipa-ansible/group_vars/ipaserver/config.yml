@@ -32,3 +32,12 @@ ipaserver_no_hbac_allow: true
 # KRA or AD Trust needed.
 ipaserver_setup_kra: false
 ipaserver_setup_adtrust: false
+
+# --- Identity defaults ---
+# Server-wide default login shell for new users that don't set their own
+# `shell` in group_vars/all/identity.sops.yaml. Applied by
+# playbooks/manage-identity.yml's ipaconfig task (NOT an ipaserver role
+# variable — role install doesn't read this). FreeIPA's own default is
+# /bin/sh if this is never set. Changing this does NOT retroactively change
+# already-created users — give them an explicit per-user `shell` instead.
+ipa_default_shell: /bin/bash

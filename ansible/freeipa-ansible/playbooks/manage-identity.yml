@@ -1,0 +1,94 @@
+---
+# Applies group_vars/all/identity.sops.yaml (ipa_groups/ipa_users/ipa_hbac_rules/
+# ipa_sudo_rules) idempotently. Safe to re-run any time that file changes —
+# existing users/groups/rules not present there are left untouched, never
+# deleted.
+- name: Apply declarative IPA identity (users, groups, HBAC)
+  hosts: ipaserver
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Set server-wide default login shell
+      freeipa.ansible_freeipa.ipaconfig:
+        ipaadmin_principal: "{{ ipaadmin_principal }}"
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        defaultshell: "{{ ipa_default_shell }}"
+
+    - name: Ensure IPA groups exist
+      freeipa.ansible_freeipa.ipagroup:
+        ipaadmin_principal: "{{ ipaadmin_principal }}"
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        name: "{{ item.name }}"
+        description: "{{ item.description | default(omit) }}"
+      loop: "{{ ipa_groups }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Ensure IPA users exist
+      freeipa.ansible_freeipa.ipauser:
+        ipaadmin_principal: "{{ ipaadmin_principal }}"
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        name: "{{ item.uid }}"
+        first: "{{ item.first }}"
+        last: "{{ item.last }}"
+        password: "{{ item.initial_password | default(omit) }}"
+        update_password: on_create
+        shell: "{{ item.shell | default(omit) }}"
+      loop: "{{ ipa_users }}"
+      loop_control:
+        label: "{{ item.uid }}"
+
+    - name: Add users to their groups
+      freeipa.ansible_freeipa.ipagroup:
+        ipaadmin_principal: "{{ ipaadmin_principal }}"
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        name: "{{ item.name }}"
+        action: member
+        user: >-
+          {{ ipa_users
+             | selectattr('groups', 'defined')
+             | selectattr('groups', 'contains', item.name)
+             | map(attribute='uid') | list }}
+      loop: "{{ ipa_groups }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Ensure IPA hostgroups exist
+      freeipa.ansible_freeipa.ipahostgroup:
+        ipaadmin_principal: "{{ ipaadmin_principal }}"
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        name: "{{ item.name }}"
+        description: "{{ item.description | default(omit) }}"
+      loop: "{{ ipa_hostgroups }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Ensure HBAC rules exist with their members
+      freeipa.ansible_freeipa.ipahbacrule:
+        ipaadmin_principal: "{{ ipaadmin_principal }}"
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        name: "{{ item.name }}"
+        description: "{{ item.description | default(omit) }}"
+        group: "{{ item.user_groups | default(omit) }}"
+        hostgroup: "{{ item.host_groups | default(omit) }}"
+        hbacsvc: "{{ item.services | default(omit) }}"
+      loop: "{{ ipa_hbac_rules }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Ensure sudo rules exist with their members
+      freeipa.ansible_freeipa.ipasudorule:
+        ipaadmin_principal: "{{ ipaadmin_principal }}"
+        ipaadmin_password: "{{ ipaadmin_password }}"
+        name: "{{ item.name }}"
+        description: "{{ item.description | default(omit) }}"
+        group: "{{ item.user_groups | default(omit) }}"
+        hostgroup: "{{ item.host_groups | default(omit) }}"
+        cmdcategory: "{{ item.command_category | default(omit) }}"
+        sudooption: "{{ item.options | default(omit) }}"
+        runasusercategory: "{{ item.run_as_user_category | default(omit) }}"
+        runasgroupcategory: "{{ item.run_as_group_category | default(omit) }}"
+      loop: "{{ ipa_sudo_rules }}"
+      loop_control:
+        label: "{{ item.name }}"
