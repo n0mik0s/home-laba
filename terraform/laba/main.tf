@@ -15,7 +15,7 @@ module "libvirt_volume_base" {
   project_name = var.project_name
   vm_name      = "ubuntu-noble-base"
   pool         = module.libvirt_pool.name
-  source_url   = "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+  source_url   = var.ubuntu_cloud_image_url
 }
 
 module "libvirt_volume_base_fedora" {

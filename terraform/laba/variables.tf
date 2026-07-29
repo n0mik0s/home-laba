@@ -29,6 +29,18 @@ variable "ssh_public_key" {
   description = "SSH public key injected into every VM. Supply via TF_VAR_ssh_public_key."
 }
 
+variable "ubuntu_cloud_image_url" {
+  type        = string
+  description = <<-EOT
+    Direct URL to the Ubuntu Noble (24.04 LTS) cloud image, used as the base
+    image for VMs with os = "ubuntu" (the default for all VMs except freeipa).
+
+    The canonical evergreen URL always points at the latest daily build of the
+    current Noble cloud image — no manual version tracking required. Only change
+    this if you need to pin to a specific build or switch to a different LTS.
+  EOT
+}
+
 variable "fedora_cloud_image_url" {
   type        = string
   description = <<-EOT

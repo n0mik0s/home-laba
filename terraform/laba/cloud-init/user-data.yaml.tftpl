@@ -17,7 +17,6 @@ users:
 
 packages:
   - qemu-guest-agent
-  - rng-tools
   - nftables
   - curl
   - ca-certificates
@@ -31,7 +30,6 @@ package_upgrade: false
 
 runcmd:
   - systemctl enable --now qemu-guest-agent
-  - systemctl enable --now rngd
 %{ for disk in data_disks ~}
 %{ if disk.format ~}
   - |
